@@ -1,0 +1,125 @@
+# Kata kunci material dari 'Compile Gedung All Auditor.xlsx' (proyek 2017-2022).
+# Satu kata kunci per baris. Baris diawali '#' diabaikan.
+# Tidak dimasukkan (kurang cocok dicari online): kaca polos/tempered/cermin,
+# kusen aluminium Alexindo, pintu PVC kamar mandi.
+
+# Cat
+cat tembok vinilex
+nippon elastex
+dulux pentalite
+dulux weathershield
+cat duco nippe
+cat minyak ftalit
+plamir tembok
+
+# Waterproofing & sealant
+sikalastic
+sika top 107
+aquaproof
+flashband
+sealant marks
+bostik sealant
+
+# Dinding & plafon
+gypsum jayaboard 9mm
+gypsum jayaboard 12mm
+gypsum knauf 9mm
+gypsum elephant 9mm
+kompon gypsum
+list profil gypsum
+grc board 9mm
+hollow galvanis 4x4 tebal 0.5
+hollow galvanis 2x4 tebal 0.5
+bata ringan per kubik
+bata merah press
+mortar perekat bata ringan
+skim coat
+
+# Semen, pasir, besi
+semen gresik 50kg
+semen instan acian
+semen instan plester
+semen instan screed lantai
+pasir beton per kubik
+batu split 1/2
+besi beton polos 10mm 12 meter
+besi ulir 13mm 12 meter
+wiremesh m8 lembar
+besi siku 4x4 6 meter
+besi hollow 40x40 hitam
+besi cnp 75
+
+# Lantai
+keramik roman 50x50
+keramik roman 30x30
+keramik roman 20x20
+keramik dinding roman 20x40
+plint keramik 10x60
+granit niro 60x60
+granit indogress 60x60
+granit sincere 60x60
+step nosing keramik
+vinyl lantai taco 3mm
+paving block
+
+# Kayu & panel
+multiplek 18mm 122x244
+hpl taco th 002 aa
+edging pvc 22mm
+akrilik bening 5mm
+
+# Pintu & hardware
+floor hinge dekson
+kunci pintu dekson
+engsel pintu dekson
+handle pintu huben
+door closer dekson
+
+# Sanitair & plumbing
+kloset duduk toto cw421j
+kran onda
+kran angsa
+kitchen sink royal
+wastafel keramik
+urinal toto
+jet shower toilet
+floor drain stainless
+pipa pvc wavin aw 1/2
+pipa rucika aw 1/2
+pompa air shimizu pc 260 bit
+tandon air penguin 650 liter
+
+# Listrik
+kabel nym 3x2.5 eterna 50 meter
+kabel eterna nym 3x1.5
+kabel eterna nym 2x1.5
+kabel supreme nym 3x2.5
+kabel utp belden cat6
+stop kontak panasonic
+saklar panasonic
+stop kontak uticon 4 lubang
+saklar broco
+clipsal vivace
+mcb schneider
+pipa conduit clipsal 20mm
+cable tray galvanis
+bohlam led philips
+armature tl led
+downlight led
+exhaust fan dinding
+
+# AC
+ac split panasonic 1 pk
+pipa ac hoda
+tabung freon r32
+armaflex pipa ac
+bracket ac outdoor
+selang drain ac
+
+# Atap & luar
+spandek pasir 0.3
+galvalum 0.3 mm
+baja ringan c75
+atap polycarbonate
+talang air pvc
+pagar brc galvanis 8mm

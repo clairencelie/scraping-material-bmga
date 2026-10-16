@@ -1,0 +1,25 @@
+# Sesi login Shopee (berisi cookie akun) — JANGAN pernah di-push
+.browser-profile/
+
+# Hasil scraping dan log (data, bukan kode; dibuat ulang saat script dijalankan)
+output/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Rahasia / konfigurasi lokal
+.env
+.env.*
+
+# File sementara Excel/Office (muncul saat file .xlsx sedang dibuka)
+~$*
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
