@@ -24,6 +24,7 @@ class Product:
     in_stock: bool | None = None
     image: str | None = None
     scraped_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    description: str | None = None  # diisi scraper.description (opsi --deskripsi)
 
     def to_dict(self) -> dict:
         return asdict(self)

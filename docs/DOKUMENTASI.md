@@ -73,6 +73,8 @@ python main.py -f keywords.txt -s mitra10 --mitra10-store 1
 | `--sort` | `relevan` | Urutan hasil Tokopedia: `relevan`, `termurah`, `termahal`, `terbaru`, `ulasan` |
 | `--mitra10-store` | `18` (MITRA10 Q-BIG) | ID toko Mitra10 sumber harga |
 | `--min-price` | – | Buang produk di bawah harga ini (mis. aksesoris murah) |
+| `--deskripsi` | mati | Ambil juga deskripsi produk ke kolom `description` (bagian 6.1) |
+| `--deskripsi-maks` | `10` | Maks produk relevan per kata kunci per situs yang diambil deskripsinya (Tokopedia/Depo Bangunan; `0` = semua). Mitra10 selalu semua |
 | `--show-browser` | mati | Tampilkan jendela browser Mitra10 (untuk debug) |
 | `-v`, `--verbose` | mati | Log level DEBUG |
 
@@ -81,6 +83,11 @@ python main.py -f keywords.txt -s mitra10 --mitra10-store 1
 ```bash
 python main.py mitra10-stores   # daftar 61 toko Mitra10: ID, nama, alamat
 python main.py shopee-login     # buka Shopee untuk login manual (lihat 5.4)
+
+# Isi kolom description ke file hasil yang sudah ada (tanpa scraping ulang).
+# Hasil ke <file>_deskripsi.xlsx; file asli tidak diubah. Lihat bagian 6.1.
+python main.py deskripsi output/harga_material_20261021.xlsx
+python main.py deskripsi output/harga_material_20261021.xlsx --maks 0   # semua produk relevan
 ```
 
 ### 3.3 Hasil dan kode keluar
@@ -113,6 +120,7 @@ scraper/
   models.py             dataclass Product = satu baris output (urutan field = urutan kolom)
   utils.py              user agent, parse rupiah, jeda acak antar request
   relevance.py          penanda relevan/match_score
+  description.py        pengisi kolom description (memilih produk, paralel, cache per URL)
   mitra10.py            scraper Mitra10
   depobangunan.py       scraper Depo Bangunan
   tokopedia.py          scraper Tokopedia
@@ -285,7 +293,35 @@ yang sama bisa muncul lebih dari sekali bila cocok dengan beberapa kata kunci.
 | `promo` | – | – | 3% |
 
 Kolom lain terisi 100% di ketiga situs. Urutan kolom ditentukan oleh urutan field di
-`scraper/models.py`.
+`scraper/models.py`. Kolom `description` (paling kanan) hanya terisi bila diminta
+(bagian 6.1).
+
+### 6.1 Kolom `description` (deskripsi produk)
+
+Deskripsi berguna untuk analisa yang lebih detail, misalnya **daya sebar cat**
+("Daya sebar teoritis 10–12 m²/kg/lapis"), isi kemasan, mutu beton, atau standar SNI.
+Deskripsi tidak ada di hasil pencarian, jadi diambil dari halaman produk:
+
+| Situs | Sumber | Yang diambil | Kecepatan |
+|---|---|---|---|
+| Mitra10 | GraphQL `description` + `short_description`, 50 produk per request | **Semua** produk | ±10 dtk per 500 produk |
+| Depo Bangunan | Halaman produk: deskripsi + tabel "Product Spesifikasi" (tipe, ukuran, merek, material, finishing) | Produk relevan, maks N per kata kunci | ±2–3 dtk per produk |
+| Tokopedia | Halaman produk (dirender server), elemen `lblPDPDescriptionProduk` | Produk relevan, maks N per kata kunci | ±2 dtk per produk (3 paralel) |
+| Shopee | – | Belum didukung | – |
+
+- N diatur dengan `--deskripsi-maks` (scraping baru) atau `--maks` (perintah
+  `deskripsi`), default 10, `0` = semua. Produk diambil urut hasil pencarian. URL yang
+  sama hanya diambil sekali.
+- **Perkiraan waktu** untuk hasil 21 Oktober (204 kata kunci): N=10 → ±2.000 halaman
+  Tokopedia ≈ 1–1,5 jam; N=0 → ±10.000 halaman ≈ 5–6 jam.
+- Server Tokopedia lambat (rata-rata ±4,5 dtk per halaman) dan ±1 dari 4–8 permintaan
+  dibalas kerangka halaman kosong (±22 KB, bukan halaman lengkap ±250 KB). Setiap
+  halaman dicoba ulang sampai 3 kali.
+- Deskripsi kosong bisa berarti penjual memang tidak mengisi deskripsinya (elemen
+  deskripsi hanya berisi `<br/>`).
+- Teks deskripsi apa adanya dari penjual. Sering diawali salam toko atau info
+  pengiriman, dan klaim spesifikasi tidak diverifikasi. Teks dipotong di 32.000 karakter
+  (batas sel Excel).
 
 ---
 
@@ -307,8 +343,8 @@ Merek pengganti boleh lolos (kabel Supreme untuk kata kunci "eterna"), karena RA
 sering menulis "setara".
 
 **Normalisasi yang dilakukan:** huruf kecil; `0,5` → `0.5`; `20 x 20` → `20x20`;
-`9 mm` → `9mm`; `650 liter`/`650 L` → `650l`; `1-2`/`1:2` → `1/2`; `1 1/2` dibedakan dari
-`1/2`. Kata satuan jual (`per`, `kubik`, `lembar`, `meter`, `tebal`) dan angka pendek
+`9 mm` → `9mm`; `4"`/`4" inch`/`4 inch` → `4inch`; `650 liter`/`650 L` → `650l`;
+`1-2`/`1:2` → `1/2`; `1 1/2` dibedakan dari `1/2`. Kata satuan jual (`per`, `kubik`, `lembar`, `meter`, `tebal`) dan angka pendek
 lepas ("12" di "12 meter") diabaikan. Ejaan lain ada di `SYNONYMS` (kran/keran,
 kloset/closet, kompon/compound, dll.). Merek yang ditulis terpisah ("AQUA PROOF") tetap
 cocok dengan "aquaproof".
@@ -349,15 +385,26 @@ produk, dan hasil yang diharapkan) dan pastikan kasus lama tetap benar.
 
 ---
 
-## 8. Kata kunci (`keywords.txt`)
+## 8. Kata kunci (`keywords*.txt`)
 
 - Satu kata kunci per baris. Baris diawali `#` diabaikan (dipakai untuk judul kategori
   dan catatan).
-- Isi saat ini: 99 kata kunci dalam 11 kategori (Cat; Waterproofing & sealant; Dinding &
-  plafon; Semen, pasir, besi; Lantai; Kayu & panel; Pintu & hardware; Sanitair & plumbing;
-  Listrik; AC; Atap & luar).
+- Ada dua daftar:
 
-**Asal-usul:** setiap baris file audit diklasifikasikan berdasarkan uraian dan
+| File | Isi | Sumber |
+|---|---|---|
+| `keywords.txt` | 99 kata kunci, 11 kategori | `Compile Gedung All Auditor.xlsx`, diklasifikasikan dari uraian & spesifikasi |
+| `keywords_20261021.txt` | 204 kata kunci, 12 kategori | `Compile Gedung Part 2 - 16 Oct 26 - Kategori Material.xlsx`, sheet `Compile All Auditor - Kategori` (kolom Material, Merk, Tipe / Seri, Ukuran / Detail) |
+
+  Kolom Merk/Ukuran di file Part 2 diisi otomatis dan cukup sering salah tempel (mis.
+  keramik bermerk "Sika", gypsum bermerk "Vinilex"), jadi kata kunci disusun per material
+  hanya dengan merek/ukuran yang cocok untuk material itu, dan masing-masing harus
+  didukung minimal 2 baris data. Kolom "Keyword Scraping" bawaan file (1.870 kata kunci)
+  tidak dipakai langsung karena memuat jasa ("jasa furniture custom hpl per meter") dan
+  hasil salah kategori ("cermin taco 9mm" untuk multiplek + HPL).
+- Daftar baru dibuat sebagai file bertanggal; daftar lama tidak diubah.
+
+**Asal-usul `keywords.txt`:** setiap baris file audit diklasifikasikan berdasarkan uraian dan
 spesifikasinya. Spesifikasi biasanya ditulis "ex <merek> <tipe/ukuran>", misalnya
 "ex Vinilex S300" atau "ex eterna, NYM 3 x 2,5 mm2". Merek dan ukuran yang paling sering
 dipakai dijadikan kata kunci. Lalu setiap kata kunci diuji di Tokopedia, dan yang hasilnya
@@ -432,6 +479,8 @@ lalu diganti "bata merah press".
 | Tokopedia: `Tokopedia GraphQL error` / HTTP 4xx | Query/header GraphQL berubah | Bandingkan dengan request asli browser (5.3) |
 | Shopee: `ShopeeBlocked` | Belum login / sesi kedaluwarsa / terdeteksi bot | `python main.py shopee-login` |
 | Banyak produk tidak relevan | Kata kunci terlalu umum, atau barang tidak dijual di situs itu | Filter `relevant = True`, perbaiki kata kunci (bagian 8) |
+| Deskripsi: `... gagal berturut-turut, berhenti` | Situs menolak/membatasi permintaan halaman produk | Tunggu beberapa saat, jalankan ulang `main.py deskripsi` pada file hasilnya (baris yang sudah terisi dilewati) |
+| Deskripsi Tokopedia banyak yang kosong | Elemen `lblPDPDescriptionProduk` berganti nama, atau kerangka kosong makin sering | Buka satu halaman produk, cek elemen deskripsinya; sesuaikan `fetch_description` di `scraper/tokopedia.py` |
 
 **Checklist verifikasi setelah mengubah scraper** (kesalahan yang pernah terjadi selama
 pengembangan dan baru ketahuan lewat pengecekan ini):
@@ -451,7 +500,7 @@ pengembangan dan baru ketahuan lewat pengecekan ini):
 **Batasan:**
 - Belum ada tes otomatis. Verifikasi selama ini dilakukan manual dengan checklist di
   bagian 11.
-- Modul Shopee belum pernah diuji dengan akun login.
+- Modul Shopee belum pernah diuji dengan akun login, dan belum mengambil deskripsi.
 - Depo Bangunan tidak menyediakan merek dan status stok yang andal. `in_stock` hanya
   `False` bila tombol keranjang tidak ada.
 - Penanda relevansi berbasis kata, bukan pemahaman makna. Ada salah tandai sekitar 15%

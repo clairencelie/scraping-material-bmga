@@ -3,6 +3,8 @@
 Contoh:
     python main.py -k "semen 50kg" -k "bata ringan" --pages 2
     python main.py --keywords-file keywords.txt --sites tokopedia depobangunan -o hasil.xlsx
+    python main.py -f keywords.txt -o output/harga.xlsx --deskripsi
+    python main.py deskripsi output/harga.xlsx        # isi deskripsi ke file hasil lama
     python main.py shopee-login
     python main.py mitra10-stores
 """
@@ -15,7 +17,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from scraper import relevance
+from scraper import description, relevance
 from scraper.depobangunan import DepoBangunanScraper
 from scraper.mitra10 import DEFAULT_STORE_ID, Mitra10Scraper, list_stores
 from scraper.models import Product
@@ -48,6 +50,37 @@ def load_keywords(args) -> list[str]:
             if line and not line.startswith("#"):
                 keywords.append(line)
     return keywords
+
+
+def load_products(path: Path) -> list[Product]:
+    """Baca file hasil (.xlsx/.csv). Kolom yang tidak dikenal (mis. ID) diabaikan."""
+    fields = set(Product.columns())
+    if path.suffix.lower() == ".xlsx":
+        from openpyxl import load_workbook
+
+        rows = list(load_workbook(path, read_only=True).active.iter_rows(values_only=True))
+        header, records = rows[0], [dict(zip(rows[0], r)) for r in rows[1:]]
+    else:
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            records = list(csv.DictReader(f))
+        header = records[0].keys() if records else []
+
+        def conv(k, v):
+            if v in ("", None):
+                return None
+            if k in ("price", "original_price"):
+                return int(float(v))
+            if k in ("match_score", "discount_percent", "rating"):
+                return float(v)
+            if k in ("relevant", "in_stock"):
+                return v == "True"
+            return v
+
+        records = [{k: conv(k, v) for k, v in r.items()} for r in records]
+    missing = {"source", "keyword", "name", "price", "url"} - set(header)
+    if missing:
+        raise SystemExit(f"{path}: bukan file hasil scraper (kolom hilang: {', '.join(sorted(missing))})")
+    return [Product(**{k: v for k, v in r.items() if k in fields}) for r in records]
 
 
 def save(products: list[Product], output: Path) -> None:
@@ -105,6 +138,9 @@ def run(args) -> int:
     for p in all_products:
         p.match_score, p.relevant = relevance.score(p.keyword, p.name)
 
+    if args.deskripsi:
+        description.enrich(all_products, max_per_keyword=args.deskripsi_maks)
+
     output = Path(args.output or f"output/harga_material_{datetime.now():%Y%m%d_%H%M%S}.csv")
     save(all_products, output)
 
@@ -118,7 +154,48 @@ def run(args) -> int:
     return 0 if all_products else 1
 
 
+def setup_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def run_deskripsi(argv: list[str]) -> int:
+    """`main.py deskripsi <file>`: isi kolom description ke file hasil yang sudah ada."""
+    ap = argparse.ArgumentParser(prog="main.py deskripsi",
+                                 description="Isi deskripsi produk ke file hasil scraping yang sudah ada")
+    ap.add_argument("file", help="file hasil scraper (.xlsx/.csv)")
+    ap.add_argument("-o", "--output", help="file tujuan (default: <file>_deskripsi.<ext>; file asli tidak diubah)")
+    ap.add_argument("--maks", type=int, default=10,
+                    help="maks produk per kata kunci per situs untuk Tokopedia/Depo Bangunan (default 10, 0 = semua)")
+    ap.add_argument("--semua-baris", action="store_true",
+                    help="ambil juga untuk produk yang relevant=False (default hanya yang relevan)")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args(argv)
+    setup_logging(args.verbose)
+
+    src = Path(args.file)
+    products = load_products(src)
+    for p in products:
+        if p.relevant is None:  # file lama sebelum ada kolom relevant
+            p.match_score, p.relevant = relevance.score(p.keyword, p.name)
+    description.enrich(products, max_per_keyword=args.maks, only_relevant=not args.semua_baris)
+
+    output = Path(args.output or src.with_name(f"{src.stem}_deskripsi{src.suffix}"))
+    save(products, output)
+    print(f"\n{len(products)} baris disimpan ke {output}")
+    for site in dict.fromkeys(p.source for p in products):
+        site_products = [p for p in products if p.source == site]
+        print(f"  {site:<13} deskripsi terisi {sum(1 for p in site_products if p.description):>5} / {len(site_products)}")
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "deskripsi":
+        return run_deskripsi(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "shopee-login":
         interactive_login()
         return 0
@@ -138,16 +215,15 @@ def main() -> int:
     ap.add_argument("--mitra10-store", type=int, default=DEFAULT_STORE_ID,
                     help=f"ID toko Mitra10 untuk harga (default {DEFAULT_STORE_ID} = Q-BIG); lihat `main.py mitra10-stores`")
     ap.add_argument("--min-price", type=int, help="buang produk di bawah harga ini (mis. aksesoris murah)")
+    ap.add_argument("--deskripsi", action="store_true",
+                    help="ambil juga deskripsi produk ke kolom description (menambah waktu, lihat --deskripsi-maks)")
+    ap.add_argument("--deskripsi-maks", type=int, default=10,
+                    help="maks produk relevan per kata kunci per situs yang diambil deskripsinya "
+                         "untuk Tokopedia/Depo Bangunan (default 10, 0 = semua); Mitra10 selalu semua")
     ap.add_argument("--show-browser", action="store_true", help="tampilkan jendela browser Mitra10")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
-
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    setup_logging(args.verbose)
     return run(args)
 
 

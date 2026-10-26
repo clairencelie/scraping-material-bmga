@@ -5,9 +5,10 @@ import logging
 from urllib.parse import urlencode
 
 import httpx
+from bs4 import BeautifulSoup
 
 from .models import Product
-from .utils import USER_AGENT, parse_rupiah, polite_sleep, to_float
+from .utils import USER_AGENT, html_to_text, parse_rupiah, polite_sleep, to_float
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +43,24 @@ SORT_OPTIONS = {
     "terbaru": 9,
     "ulasan": 5,
 }
+
+
+def fetch_description(client: httpx.Client, url: str, attempts: int = 3) -> str | None:
+    """Deskripsi produk dari halaman produk (dirender di server, tidak perlu browser).
+
+    Sekitar 1 dari 4 permintaan, Tokopedia mengirim kerangka halaman kosong (±22 KB,
+    tanpa isi SSR) alih-alih halaman lengkap (±250 KB). Permintaan ulang biasanya berhasil.
+    """
+    for attempt in range(1, attempts + 1):
+        resp = client.get(url, headers={"Accept": "text/html", "Accept-Language": "id-ID,id;q=0.9"})
+        resp.raise_for_status()
+        el = BeautifulSoup(resp.text, "html.parser").select_one('[data-testid="lblPDPDescriptionProduk"]')
+        if el:
+            return html_to_text(str(el))
+        if attempt < attempts:
+            polite_sleep(1.0, 2.0)
+    log.debug("[tokopedia] deskripsi tidak ditemukan setelah %d percobaan: %s", attempts, url)
+    return None
 
 
 def _ribbon_percent(text: str | None) -> float | None:

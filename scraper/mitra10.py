@@ -19,7 +19,7 @@ import httpx
 from playwright.sync_api import Response, sync_playwright
 
 from .models import Product
-from .utils import USER_AGENT, parse_rupiah, polite_sleep, to_float
+from .utils import MAX_TEXT, USER_AGENT, html_to_text, parse_rupiah, polite_sleep, to_float
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,40 @@ query ($keys: [String], $store: Int) {
   }
 }
 """
+
+
+DESCRIPTION_QUERY = """
+query ($keys: [String]) {
+  products(filter: { url_key: { in: $keys } }, pageSize: 100) {
+    items { url_key description { html } short_description { html } }
+  }
+}
+"""
+DESCRIPTION_BATCH = 50
+
+
+def fetch_descriptions(products: list[Product]) -> int:
+    """Isi `description` untuk produk Mitra10 sekaligus per 50 produk. Mengembalikan jumlah yang terisi."""
+    by_key: dict[str, list[Product]] = {}
+    for p in products:
+        by_key.setdefault(p.url.rsplit("/", 1)[-1], []).append(p)
+    keys = [k for k in by_key if k]
+    filled = 0
+    with _client() as client:
+        for i in range(0, len(keys), DESCRIPTION_BATCH):
+            data = _graphql(client, DESCRIPTION_QUERY, {"keys": keys[i:i + DESCRIPTION_BATCH]})
+            for item in data["products"]["items"]:
+                desc = html_to_text((item.get("description") or {}).get("html"))
+                short = html_to_text((item.get("short_description") or {}).get("html"))
+                # short_description sering berisi "Keunggulan ..." yang tidak ada di description.
+                if short and (not desc or short[:80] not in desc):
+                    desc = f"{desc}\n\n{short}" if desc else short
+                for p in by_key.get(item["url_key"], []):
+                    p.description = desc[:MAX_TEXT] if desc else None
+                    filled += bool(desc)
+            if i + DESCRIPTION_BATCH < len(keys):
+                polite_sleep(1.0, 2.0)
+    return filled
 
 
 def _graphql(client: httpx.Client, query: str, variables: dict | None = None) -> dict:

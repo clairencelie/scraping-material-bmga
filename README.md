@@ -47,10 +47,14 @@ Opsi:
 - `--sort` urutan Tokopedia: `relevan`, `termurah`, `termahal`, `terbaru`, `ulasan`
 - `--mitra10-store` ID toko Mitra10 untuk harga (default 18 = MITRA10 Q-BIG); daftar ID: `python main.py mitra10-stores`
 - `--min-price` buang produk di bawah harga ini
+- `--deskripsi` ambil juga deskripsi produk ke kolom `description`; `--deskripsi-maks N`
+  batasi N produk relevan per kata kunci per situs untuk Tokopedia/Depo Bangunan
+  (default 10, 0 = semua). Untuk file hasil lama: `python main.py deskripsi <file.xlsx>`
 - `--show-browser` tampilkan jendela browser Mitra10 (untuk debug)
 
 Kolom output: `source, keyword, name, price, url, relevant, match_score, original_price,
-discount_percent, promo, brand, seller, location, rating, sold, in_stock, image, scraped_at`.
+discount_percent, promo, brand, seller, location, rating, sold, in_stock, image, scraped_at,
+description`.
 
 ## Kolom `relevant` dan `match_score`
 

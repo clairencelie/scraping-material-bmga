@@ -25,6 +25,7 @@ SYNONYMS = {
     "spandek": {"spandex", "spandeck"},
     "hollow": {"holo", "hollo"},
     "kompon": {"compound", "coumpound"},
+    "aluminium": {"alumunium", "aluminum", "almunium"},
 }
 # Titik dan "/" hanya menyambung angka (0.5, 1/2), bukan "uk.60x60" atau
 # "list/plint/10x60"; "+" menandai pecahan campuran (1+1/2 = 1½) agar tidak
@@ -38,6 +39,7 @@ def _normalize(text: str) -> str:
     t = re.sub(r"(\d)\s*x\s*(\d)", r"\1x\2", t)  # 20 x 20 -> 20x20
     t = re.sub(r"(\d+)[\s-]+(\d+/\d+)", r"\1+\2", t)  # 1 1/2 -> 1+1/2
     t = re.sub(r"(\d)\s*[-:]\s*(\d)", r"\1/\2", t)  # split 1-2 / 1:2 -> 1/2
+    t = re.sub(r"(\d)\s*(?:\"|”|'')\s*(?:inch\b|in\b)?", r"\1inch", t)  # 4" / 4" inch -> 4inch
     t = re.sub(r"(\d)\s*(liter|ltr|lt)\b", r"\1l", t)  # 650 liter / 650 L -> 650l
     t = re.sub(r"(\d)\s+(mm|cm|kg|pk|l|inch|w)\b", r"\1\2", t)  # 9 mm -> 9mm
     return t

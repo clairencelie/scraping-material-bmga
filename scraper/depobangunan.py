@@ -7,11 +7,31 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .models import Product
-from .utils import USER_AGENT, parse_rupiah, polite_sleep
+from .utils import MAX_TEXT, USER_AGENT, html_to_text, parse_rupiah, polite_sleep
 
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.depobangunan.co.id/catalogsearch/result/"
+
+
+def fetch_description(client: httpx.Client, url: str) -> str | None:
+    """Deskripsi + tabel spesifikasi (tipe, ukuran, merek, material, ...) dari halaman produk."""
+    resp = client.get(url)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+    parts = []
+    desc = soup.select_one(".product.attribute.description .value") or soup.select_one("#description")
+    if desc:
+        parts.append(html_to_text(str(desc)))
+    specs = [
+        f"{th.get_text(strip=True)}: {td.get_text(' ', strip=True)}"
+        for row in soup.select("#additional tr, .additional-attributes tr")
+        if (th := row.select_one("th")) and (td := row.select_one("td"))
+    ]
+    if specs:
+        parts.append("Spesifikasi:\n" + "\n".join(dict.fromkeys(specs)))
+    text = "\n\n".join(p for p in parts if p)
+    return text[:MAX_TEXT] or None
 
 
 class DepoBangunanScraper:
