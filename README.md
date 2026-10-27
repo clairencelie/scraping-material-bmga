@@ -2,6 +2,8 @@
 
 > Dokumentasi lengkap untuk tim implementasi (cara kerja per situs, skema output,
 > interpretasi harga, troubleshooting): [docs/DOKUMENTASI.md](docs/DOKUMENTASI.md)
+>
+> Perintah siap pakai untuk menjalankan scraping: [Perintah scraping](#perintah-scraping)
 
 Mengambil nama produk, harga, harga coret, diskon, toko, lokasi, rating, jumlah terjual,
 dan URL dari:
@@ -22,7 +24,125 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## Pemakaian
+## Perintah scraping
+
+Semua perintah dijalankan dari folder proyek. Ganti tanggal di nama file output
+(`20261027`) dengan tanggal mulai menjalankan, dan pakai nama yang sama saat melanjutkan.
+
+```bash
+cd /Users/clairence/Documents/Dev/scrap-material
+```
+
+### 1. Daftar utama: 204 kata kunci (`keywords_20261021.txt`)
+
+Dengan deskripsi produk (±1,5–2 jam):
+
+```bash
+.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi >> output/scrape_20261027.log 2>&1
+```
+
+Tanpa deskripsi (±35 menit):
+
+```bash
+.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx >> output/scrape_20261027.log 2>&1
+```
+
+Deskripsi untuk **semua** produk relevan, bukan hanya 10 per kata kunci (±5–6 jam):
+
+```bash
+.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi --deskripsi-maks 0 >> output/scrape_20261027.log 2>&1
+```
+
+### 2. Daftar tambahan multi-material: 32 kata kunci (`keywords_20261022_tambahan.txt`)
+
+Dengan deskripsi (±15 menit):
+
+```bash
+.venv/bin/python main.py -f keywords_20261022_tambahan.txt -o output/harga_material_20261027_tambahan.xlsx --deskripsi >> output/scrape_20261027_tambahan.log 2>&1
+```
+
+### 3. Cek progres (sudah berapa dari berapa)
+
+Ringkasan progres, diperbarui terus selama berjalan:
+
+```bash
+cat output/harga_material_20261027_PROGRES.txt
+```
+
+Ikuti log secara langsung (di terminal lain; Ctrl+C hanya menghentikan pemantauan):
+
+```bash
+tail -f output/scrape_20261027.log
+```
+
+Hasil sementara bisa dibuka kapan saja di `output/harga_material_20261027.xlsx`
+(diperbarui tiap 5 menit dan saat proses dihentikan).
+
+### 4. Melanjutkan proses yang berhenti
+
+Jalankan lagi **perintah yang sama persis**, terutama `-o` yang sama. Contoh untuk daftar
+utama:
+
+```bash
+.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi >> output/scrape_20261027.log 2>&1
+```
+
+- Yang sudah selesai dilewati, yang gagal dicoba lagi, dan deskripsi tidak diambil ulang.
+- Berlaku setelah Ctrl+C, laptop mati/sleep, atau koneksi putus, termasuk dilanjutkan
+  besok hari.
+- Perintah lengkapnya juga tertulis di bagian bawah file `_PROGRES.txt`.
+- Log memakai `>>` (menambah), jadi log jalan sebelumnya tidak tertimpa.
+- Jangan ubah `-p`, `--mitra10-store`, `--sort`, atau `--min-price` saat melanjutkan;
+  script akan menolak supaya hasil tidak tercampur.
+
+Mulai dari awal (abaikan progres tersimpan untuk output ini), tambahkan `--ulang`:
+
+```bash
+.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi --ulang >> output/scrape_20261027.log 2>&1
+```
+
+### 5. Isi deskripsi ke file hasil yang sudah ada (tanpa scraping ulang)
+
+Hasil disimpan ke `<nama file>_deskripsi.xlsx`; file asli tidak diubah. Tambahkan
+`--maks 0` untuk semua produk relevan (default 10 per kata kunci). Bisa dilanjutkan dengan
+menjalankan perintah yang sama.
+
+```bash
+.venv/bin/python main.py deskripsi output/harga_material_20261021_New_22Okt.xlsx >> output/deskripsi_New_22Okt.log 2>&1
+```
+
+```bash
+cat output/harga_material_20261021_New_22Okt_deskripsi_PROGRES.txt
+```
+
+### 6. Uji cepat satu kata kunci (sebelum dimasukkan ke file kata kunci)
+
+```bash
+.venv/bin/python main.py -k "kaca 8mm per m2" -s tokopedia
+```
+
+### 7. Harga Mitra10 dari toko lain
+
+Lihat daftar ID toko:
+
+```bash
+.venv/bin/python main.py mitra10-stores
+```
+
+Scraping Mitra10 dengan toko tertentu (contoh ID 1 = MITRA10 CIBUBUR):
+
+```bash
+.venv/bin/python main.py -f keywords_20261021.txt -s mitra10 --mitra10-store 1 -o output/harga_mitra10_toko1_20261027.xlsx >> output/scrape_mitra10_toko1_20261027.log 2>&1
+```
+
+### Catatan
+
+- Selalu pakai `-o` untuk jalan panjang; tanpa `-o` proses tidak bisa dilanjutkan.
+- Hasil berisi kolom `relevant` (True/False): saring `relevant = True` sebelum analisa.
+- Detail progres & melanjutkan: bagian 3.4 di [docs/DOKUMENTASI.md](docs/DOKUMENTASI.md).
+- Bantuan semua opsi: `.venv/bin/python main.py --help`
+
+## Contoh lain & opsi
 
 ```bash
 # Satu/lebih kata kunci, default situs: mitra10, depobangunan, tokopedia
@@ -50,6 +170,7 @@ Opsi:
 - `--deskripsi` ambil juga deskripsi produk ke kolom `description`; `--deskripsi-maks N`
   batasi N produk relevan per kata kunci per situs untuk Tokopedia/Depo Bangunan
   (default 10, 0 = semua). Untuk file hasil lama: `python main.py deskripsi <file.xlsx>`
+- `--ulang` abaikan progres tersimpan dan mulai dari awal
 - `--show-browser` tampilkan jendela browser Mitra10 (untuk debug)
 
 Kolom output: `source, keyword, name, price, url, relevant, match_score, original_price,

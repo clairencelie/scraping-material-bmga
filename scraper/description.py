@@ -34,10 +34,12 @@ MAX_CONSECUTIVE_FAILURES = 10
 
 
 def _pick(products: list[Product], max_per_keyword: int, only_relevant: bool) -> list[Product]:
+    """N produk teratas per (situs, kata kunci). Produk yang sudah berdeskripsi tetap dihitung,
+    supaya melanjutkan proses tidak menggeser pilihan ke produk di luar N teratas."""
     taken: dict[tuple[str, str], int] = defaultdict(int)
     picked = []
     for p in products:
-        if p.description or (only_relevant and not p.relevant):
+        if only_relevant and not p.relevant:
             continue
         key = (p.source, p.keyword)
         if max_per_keyword and taken[key] >= max_per_keyword:
@@ -47,14 +49,37 @@ def _pick(products: list[Product], max_per_keyword: int, only_relevant: bool) ->
     return picked
 
 
-def enrich(products: list[Product], max_per_keyword: int = 10, only_relevant: bool = True) -> None:
-    """Isi `description` di tempat. `max_per_keyword=0` = tanpa batas."""
-    mitra = [p for p in products if p.source == "mitra10" and not p.description]
+class _NoTracker:
+    def start(self, site: str, total: int, done: int = 0) -> None:
+        pass
+
+    def result(self, site: str, url: str, text: str | None) -> None:
+        pass
+
+
+def enrich(products: list[Product], max_per_keyword: int = 10, only_relevant: bool = True,
+           cache: dict[str, str] | None = None, tracker=None) -> None:
+    """Isi `description` di tempat. `max_per_keyword=0` = tanpa batas.
+
+    `cache` (url -> deskripsi) berisi hasil jalan sebelumnya; URL di dalamnya tidak diambil
+    ulang. `tracker` (mis. Checkpoint) menerima `start(site, total)` dan
+    `result(site, url, text)` untuk tiap halaman yang selesai.
+    """
+    cache = cache if cache is not None else {}
+    tracker = tracker or _NoTracker()
+
+    mitra_all = {p.url for p in products if p.source == "mitra10"}
+    mitra = [p for p in products if p.source == "mitra10" and not p.description and p.url not in cache]
+    if mitra_all:
+        todo = len({p.url for p in mitra})
+        tracker.start("mitra10", len(mitra_all), len(mitra_all) - todo)
     if mitra:
         log.info("[deskripsi] mitra10: %d produk (GraphQL per 50)", len(mitra))
         try:
             n = mitra10.fetch_descriptions(mitra)
             log.info("[deskripsi] mitra10: %d terisi", n)
+            for url, p in {p.url: p for p in mitra}.items():
+                tracker.result("mitra10", url, p.description)
         except Exception as e:
             log.error("[deskripsi] mitra10 gagal: %s", e)
 
@@ -63,19 +88,23 @@ def enrich(products: list[Product], max_per_keyword: int = 10, only_relevant: bo
 
     for site, fetch in PER_PAGE_FETCHERS.items():
         targets = _pick([p for p in products if p.source == site], max_per_keyword, only_relevant)
-        urls = list(dict.fromkeys(p.url for p in targets if p.url))
-        if not urls:
-            continue
-        log.info("[deskripsi] %s: %d halaman produk", site, len(urls))
-        cache = _fetch_all(site, fetch, urls)
+        urls = list(dict.fromkeys(p.url for p in targets if p.url and not p.description and p.url not in cache))
+        already = len({p.url for p in targets if p.url}) - len(urls)
+        if urls or already:
+            tracker.start(site, len(urls) + already, already)
+        if urls:
+            log.info("[deskripsi] %s: %d halaman produk%s", site, len(urls),
+                     f" (+{already} sudah ada)" if already else "")
+            cache.update(_fetch_all(site, fetch, urls, tracker))
         for p in targets:
-            if cache.get(p.url):
+            if not p.description and cache.get(p.url):
                 p.description = cache[p.url]
-        log.info("[deskripsi] %s: %d terisi", site, sum(1 for v in cache.values() if v))
+        if urls:
+            log.info("[deskripsi] %s: %d terisi", site, sum(1 for u in urls if cache.get(u)))
 
 
-def _fetch_all(site: str, fetch, urls: list[str]) -> dict[str, str | None]:
-    cache: dict[str, str | None] = {}
+def _fetch_all(site: str, fetch, urls: list[str], tracker) -> dict[str, str]:
+    cache: dict[str, str] = {}
     lock = threading.Lock()
     stop = threading.Event()
     state = {"done": 0, "failures": 0}
@@ -90,8 +119,11 @@ def _fetch_all(site: str, fetch, urls: list[str]) -> dict[str, str | None]:
             except Exception as e:
                 text, ok = None, False
                 log.warning("[deskripsi] %s gagal (%s): %s", site, e.__class__.__name__, url)
+            if ok:  # yang gagal tidak dicatat, jadi dicoba lagi saat dilanjutkan
+                tracker.result(site, url, text)
             with lock:
-                cache[url] = text
+                if ok:
+                    cache[url] = text or ""
                 state["done"] += 1
                 state["failures"] = 0 if ok else state["failures"] + 1
                 if state["failures"] >= MAX_CONSECUTIVE_FAILURES and not stop.is_set():
@@ -102,5 +134,9 @@ def _fetch_all(site: str, fetch, urls: list[str]) -> dict[str, str | None]:
             polite_sleep(1.0, 2.0)
 
         with ThreadPoolExecutor(max_workers=WORKERS.get(site, 1)) as pool:
-            list(pool.map(work, urls))
+            try:
+                list(pool.map(work, urls))
+            except KeyboardInterrupt:
+                stop.set()  # pekerja yang belum mulai langsung selesai; yang berjalan diselesaikan
+                raise
     return cache

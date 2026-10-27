@@ -75,6 +75,7 @@ python main.py -f keywords.txt -s mitra10 --mitra10-store 1
 | `--min-price` | – | Buang produk di bawah harga ini (mis. aksesoris murah) |
 | `--deskripsi` | mati | Ambil juga deskripsi produk ke kolom `description` (bagian 6.1) |
 | `--deskripsi-maks` | `10` | Maks produk relevan per kata kunci per situs yang diambil deskripsinya (Tokopedia/Depo Bangunan; `0` = semua). Mitra10 selalu semua |
+| `--ulang` | mati | Abaikan progres tersimpan untuk output ini dan mulai dari awal (3.4) |
 | `--show-browser` | mati | Tampilkan jendela browser Mitra10 (untuk debug) |
 | `-v`, `--verbose` | mati | Log level DEBUG |
 
@@ -100,12 +101,54 @@ kunci lain. Situs yang gagal dibuka (mis. Shopee belum login) dilewati.
 |---|---|
 | `0` | Ada produk tersimpan |
 | `1` | Jalan selesai tapi tidak ada produk sama sekali |
-| `2` | Tidak ada kata kunci (lupa `-k`/`-f`) |
+| `2` | Tidak ada kata kunci (lupa `-k`/`-f`), atau pengaturan berbeda dari jalan sebelumnya (3.4) |
+| `130` | Dihentikan dengan Ctrl+C (hasil sementara sudah disimpan) |
 
 Untuk jalan panjang, simpan log ke file:
 
 ```bash
 python main.py -f keywords.txt -o output/harga.xlsx > output/scrape.log 2>&1
+```
+
+### 3.4 Progres tersimpan & melanjutkan proses yang berhenti
+
+Hasil tidak menunggu proses selesai. Untuk output `X.xlsx` ada dua file pendamping:
+
+| File | Isi | Kapan ditulis |
+|---|---|---|
+| `X.xlsx.progres.jsonl` | Jurnal: hasil tiap kata kunci × situs, tiap deskripsi, dan pengaturan jalan | Langsung setiap satu kata kunci × situs / satu deskripsi selesai (di-flush ke disk) |
+| `X_PROGRES.txt` | Ringkasan: tahap, **sudah berapa dari berapa** per situs, jumlah produk, yang gagal, perkiraan sisa waktu, perintah untuk melanjutkan | Setiap ada kemajuan (paling sering tiap 5 detik) |
+| `X.xlsx` | Hasil (sementara) | Tiap 5 menit, saat Ctrl+C, dan saat selesai |
+
+**Melanjutkan:** jalankan **perintah yang sama persis** (terutama `-o` yang sama).
+- Kata kunci × situs yang sudah selesai dilewati.
+- Yang gagal dicoba lagi.
+- Deskripsi yang sudah diambil tidak diambil ulang.
+
+Ini berlaku setelah Ctrl+C, laptop mati, maupun koneksi putus. Sudah diuji dengan Ctrl+C
+dan dengan mematikan proses paksa (kill -9), baik di tahap scraping maupun deskripsi;
+hasil akhirnya sama dengan jalan tanpa gangguan. Perintah `main.py deskripsi` bekerja
+dengan cara yang sama.
+
+**Syarat dan aturan:**
+- Wajib memakai `-o`. Tanpa `-o`, nama output memakai jam sekarang sehingga jalan
+  berikutnya tidak menemukan progresnya. Script memberi peringatan untuk kasus ini.
+- Bila `-p`, `--mitra10-store`, `--sort`, atau `--min-price` berbeda dari jalan
+  sebelumnya, script menolak (kode keluar 2) supaya hasil lama dan baru tidak tercampur.
+  Pilihannya: pakai pengaturan yang sama, nama output lain, atau `--ulang` untuk mulai
+  dari awal.
+- Kata kunci boleh ditambah di antara dua jalan; yang baru ikut dikerjakan. Kata kunci
+  yang dihapus dari daftar tidak ikut masuk Excel.
+- Jurnal tetap disimpan setelah selesai. Menjalankan ulang perintah yang sama hanya
+  menulis ulang Excel dari jurnal, tanpa scraping.
+- Bila Excel hasil sedang dibuka saat script menyimpan, penyimpanan bisa gagal; script
+  mencatat peringatan dan mencoba lagi pada penyimpanan berikutnya. Jurnal tidak
+  terpengaruh.
+
+Contoh memantau dari terminal lain:
+
+```bash
+cat output/harga_material_20261027_PROGRES.txt
 ```
 
 ---
@@ -121,6 +164,7 @@ scraper/
   utils.py              user agent, parse rupiah, jeda acak antar request
   relevance.py          penanda relevan/match_score
   description.py        pengisi kolom description (memilih produk, paralel, cache per URL)
+  checkpoint.py         jurnal progres, file _PROGRES.txt, dan mekanisme melanjutkan
   mitra10.py            scraper Mitra10
   depobangunan.py       scraper Depo Bangunan
   tokopedia.py          scraper Tokopedia

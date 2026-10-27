@@ -14,10 +14,12 @@ import argparse
 import csv
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 from scraper import description, relevance
+from scraper.checkpoint import Checkpoint, SettingsChanged
 from scraper.depobangunan import DepoBangunanScraper
 from scraper.mitra10 import DEFAULT_STORE_ID, Mitra10Scraper, list_stores
 from scraper.models import Product
@@ -109,48 +111,116 @@ def save(products: list[Product], output: Path) -> None:
             writer.writerows(p.to_dict() for p in products)
 
 
+# Excel hasil sementara ditulis ulang paling sering tiap selang ini (detik).
+SNAPSHOT_EVERY = 300
+
+
+class Snapshot:
+    """Menulis file Excel/CSV hasil sementara secara berkala."""
+
+    def __init__(self, output: Path, collect) -> None:
+        self.output, self.collect, self.last = output, collect, time.time()
+
+    def maybe(self) -> None:
+        if time.time() - self.last >= SNAPSHOT_EVERY:
+            self.now()
+
+    def now(self) -> list[Product]:
+        products = self.collect()
+        try:
+            save(products, self.output)
+            log.info("[progres] hasil sementara disimpan: %s (%d baris)", self.output, len(products))
+        except OSError as e:  # mis. file sedang dibuka & dikunci Excel
+            log.warning("[progres] gagal menyimpan %s: %s (dicoba lagi nanti)", self.output, e)
+        self.last = time.time()
+        return products
+
+
 def run(args) -> int:
     keywords = load_keywords(args)
     if not keywords:
         print("Tidak ada kata kunci. Pakai -k \"semen\" atau --keywords-file keywords.txt", file=sys.stderr)
         return 2
 
-    all_products: list[Product] = []
-    failures: list[str] = []
-    for site in args.sites:
-        try:
-            with build_scraper(site, args) as scraper:
-                for i, kw in enumerate(keywords):
-                    try:
-                        all_products.extend(scraper.search(kw, max_pages=args.pages))
-                    except Exception as e:  # satu kata kunci gagal tidak menghentikan yang lain
-                        log.error("[%s] '%s' gagal: %s", site, kw, e)
-                        failures.append(f"{site}: {kw}")
-                    if i < len(keywords) - 1:
-                        polite_sleep()
-        except Exception as e:
-            log.error("[%s] tidak bisa dijalankan: %s", site, e)
-            failures.append(f"{site}: semua")
-
-    if args.min_price is not None:
-        all_products = [p for p in all_products if p.price and p.price >= args.min_price]
-
-    for p in all_products:
-        p.match_score, p.relevant = relevance.score(p.keyword, p.name)
-
-    if args.deskripsi:
-        description.enrich(all_products, max_per_keyword=args.deskripsi_maks)
-
+    if not args.output:
+        log.warning("Tanpa -o, nama output memakai jam sekarang sehingga proses TIDAK bisa dilanjutkan "
+                    "bila berhenti. Pakai -o output/nama.xlsx untuk jalan yang panjang.")
     output = Path(args.output or f"output/harga_material_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    meta = {"mode": "scraping", "pages": args.pages, "mitra10_store": args.mitra10_store,
+            "sort": args.sort, "min_price": args.min_price}
+    try:
+        cp = Checkpoint(output, meta, fresh=args.ulang)
+    except SettingsChanged as e:
+        print(e, file=sys.stderr)
+        return 2
+
+    tasks = [(site, kw) for site in args.sites for kw in keywords]
+    cp.plan(args.sites, keywords)
+    done_before = sum(1 for t in tasks if cp.is_done(*t))
+    if done_before:
+        log.info("[lanjut] %d / %d kata kunci x situs sudah selesai sebelumnya, dilewati; "
+                 "%d deskripsi sudah tersimpan", done_before, len(tasks), len(cp.desc))
+    snapshot = Snapshot(output, lambda: cp.products_for(tasks))
+    cp.write_status("scraping", force=True)
+
+    try:
+        for site in args.sites:
+            pending = [kw for kw in keywords if not cp.is_done(site, kw)]
+            if not pending:
+                continue
+            try:
+                with build_scraper(site, args) as scraper:
+                    for i, kw in enumerate(pending):
+                        try:
+                            found = scraper.search(kw, max_pages=args.pages)
+                        except Exception as e:  # satu kata kunci gagal tidak menghentikan yang lain
+                            log.error("[%s] '%s' gagal: %s", site, kw, e)
+                            cp.failures.append(f"{site}: {kw}")
+                        else:
+                            if args.min_price is not None:
+                                found = [p for p in found if p.price and p.price >= args.min_price]
+                            for p in found:
+                                p.match_score, p.relevant = relevance.score(p.keyword, p.name)
+                            cp.add_task(site, kw, found)
+                        n_done = sum(1 for t in tasks if cp.is_done(*t))
+                        log.info("[progres] %d / %d kata kunci x situs (%d%%)", n_done, len(tasks),
+                                 n_done * 100 // len(tasks))
+                        cp.write_status("scraping")
+                        snapshot.maybe()
+                        if i < len(pending) - 1:
+                            polite_sleep()
+            except Exception as e:
+                log.error("[%s] tidak bisa dijalankan: %s", site, e)
+                cp.failures.append(f"{site}: semua yang belum selesai")
+
+        all_products = cp.products_for(tasks)
+        if args.deskripsi:
+            cp.write_status("deskripsi", force=True)
+            description.enrich(all_products, max_per_keyword=args.deskripsi_maks, cache=cp.desc, tracker=cp)
+    except KeyboardInterrupt:
+        products = snapshot.now()
+        cp.write_status("dihentikan (Ctrl+C)", force=True)
+        cp.close()
+        print(f"\nDihentikan. {len(products)} baris hasil sementara ada di {output}.\n"
+              f"Progres: {cp.status_path}\nLanjutkan dengan menjalankan perintah yang sama.", file=sys.stderr)
+        return 130
+
     save(all_products, output)
+    complete = all(cp.is_done(*t) for t in tasks)
+    cp.write_status("selesai" if complete else "selesai sebagian (ada yang gagal)", force=True)
+    cp.close()
 
     print(f"\n{len(all_products)} produk disimpan ke {output}")
     for site in args.sites:
         site_products = [p for p in all_products if p.source == site]
         n_relevant = sum(1 for p in site_products if p.relevant)
-        print(f"  {site:<13} {len(site_products):>5}  (relevan: {n_relevant})")
-    if failures:
-        print("Gagal: " + ", ".join(failures))
+        n_desc = sum(1 for p in site_products if p.description)
+        print(f"  {site:<13} {len(site_products):>5}  (relevan: {n_relevant}"
+              + (f", deskripsi: {n_desc}" if args.deskripsi else "") + ")")
+    if cp.failures:
+        print("Gagal: " + ", ".join(cp.failures))
+        print("Jalankan perintah yang sama untuk mencoba ulang yang gagal.")
+    print(f"Progres & jurnal: {cp.status_path}, {cp.journal_path}")
     return 0 if all_products else 1
 
 
@@ -173,23 +243,54 @@ def run_deskripsi(argv: list[str]) -> int:
                     help="maks produk per kata kunci per situs untuk Tokopedia/Depo Bangunan (default 10, 0 = semua)")
     ap.add_argument("--semua-baris", action="store_true",
                     help="ambil juga untuk produk yang relevant=False (default hanya yang relevan)")
+    ap.add_argument("--ulang", action="store_true",
+                    help="abaikan progres sebelumnya dan mulai dari awal")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     setup_logging(args.verbose)
 
     src = Path(args.file)
+    output = Path(args.output or src.with_name(f"{src.stem}_deskripsi{src.suffix}"))
+    try:
+        cp = Checkpoint(output, {"mode": "deskripsi", "source_file": str(src.resolve())}, fresh=args.ulang)
+    except SettingsChanged as e:
+        print(e, file=sys.stderr)
+        return 2
     products = load_products(src)
     for p in products:
         if p.relevant is None:  # file lama sebelum ada kolom relevant
             p.match_score, p.relevant = relevance.score(p.keyword, p.name)
-    description.enrich(products, max_per_keyword=args.maks, only_relevant=not args.semua_baris)
+        if not p.description and cp.desc.get(p.url):
+            p.description = cp.desc[p.url]
+    if cp.desc:
+        log.info("[lanjut] %d deskripsi sudah tersimpan dari jalan sebelumnya", len(cp.desc))
+    cp.write_status("deskripsi", force=True)
 
-    output = Path(args.output or src.with_name(f"{src.stem}_deskripsi{src.suffix}"))
-    save(products, output)
+    def collect() -> list[Product]:
+        for p in products:
+            if not p.description and cp.desc.get(p.url):
+                p.description = cp.desc[p.url]
+        return products
+
+    try:
+        description.enrich(products, max_per_keyword=args.maks, only_relevant=not args.semua_baris,
+                           cache=cp.desc, tracker=cp)
+    except KeyboardInterrupt:
+        Snapshot(output, collect).now()
+        cp.write_status("dihentikan (Ctrl+C)", force=True)
+        cp.close()
+        print(f"\nDihentikan. Hasil sementara ada di {output}.\nProgres: {cp.status_path}\n"
+              "Lanjutkan dengan menjalankan perintah yang sama.", file=sys.stderr)
+        return 130
+
+    save(collect(), output)
+    cp.write_status("selesai", force=True)
+    cp.close()
     print(f"\n{len(products)} baris disimpan ke {output}")
     for site in dict.fromkeys(p.source for p in products):
         site_products = [p for p in products if p.source == site]
         print(f"  {site:<13} deskripsi terisi {sum(1 for p in site_products if p.description):>5} / {len(site_products)}")
+    print(f"Progres & jurnal: {cp.status_path}, {cp.journal_path}")
     return 0
 
 
@@ -220,6 +321,9 @@ def main() -> int:
     ap.add_argument("--deskripsi-maks", type=int, default=10,
                     help="maks produk relevan per kata kunci per situs yang diambil deskripsinya "
                          "untuk Tokopedia/Depo Bangunan (default 10, 0 = semua); Mitra10 selalu semua")
+    ap.add_argument("--ulang", action="store_true",
+                    help="abaikan progres sebelumnya untuk output ini dan mulai dari awal "
+                         "(default: jalankan ulang perintah yang sama = melanjutkan)")
     ap.add_argument("--show-browser", action="store_true", help="tampilkan jendela browser Mitra10")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
