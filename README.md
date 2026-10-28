@@ -27,101 +27,104 @@ playwright install chromium
 ## Perintah scraping
 
 Semua perintah dijalankan dari folder proyek. Ganti tanggal di nama file output
-(`20261027`) dengan tanggal mulai menjalankan, dan pakai nama yang sama saat melanjutkan.
+(`20261028`) dengan tanggal mulai menjalankan, dan pakai nama yang sama saat melanjutkan.
+
+Selama berjalan, terminal menampilkan baris progres yang terus diperbarui, mis.:
+
+```
+[scraping] █████████████░░░░░░░ 4/6 (66%) | tokopedia: kran onda | 67 produk | jalan 0m09d | sisa ±1 menit
+[deskripsi tokopedia] ██████████░░░░░░░░░░ 3/6 (50%) | jalan 0m34d | sisa ±1 menit
+```
+
+Log lengkap otomatis tersimpan di samping file output (`output/harga_material_20261028.log`,
+ditambahkan di akhir setiap kali dijalankan), jadi tidak perlu `>> log 2>&1` lagi.
+Peringatan & error tetap tampil di terminal; tambahkan `-v` untuk menampilkan semua detail.
 
 ```bash
 cd /Users/clairence/Documents/Dev/scrap-material
 ```
 
-### 1. Daftar utama: 204 kata kunci (`keywords_20261021.txt`)
+### 1. Scraping keywords_material.txt: 236 kata kunci (`keywords_material.txt`)
 
-Dengan deskripsi produk (±1,5–2 jam):
-
-```bash
-.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi >> output/scrape_20261027.log 2>&1
-```
-
-Tanpa deskripsi (±35 menit):
+Dengan deskripsi produk (±2 jam):
 
 ```bash
-.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx >> output/scrape_20261027.log 2>&1
+.venv/bin/python main.py -f keywords_material.txt -o output/harga_material_20261028.xlsx --deskripsi
 ```
 
-Deskripsi untuk **semua** produk relevan, bukan hanya 10 per kata kunci (±5–6 jam):
+Tanpa deskripsi (±40 menit):
 
 ```bash
-.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi --deskripsi-maks 0 >> output/scrape_20261027.log 2>&1
+.venv/bin/python main.py -f keywords_material.txt -o output/harga_material_20261028.xlsx
 ```
 
-### 2. Daftar tambahan multi-material: 32 kata kunci (`keywords_20261022_tambahan.txt`)
-
-Dengan deskripsi (±15 menit):
+Deskripsi untuk **semua** produk relevan, bukan hanya 10 per kata kunci (±6–7 jam):
 
 ```bash
-.venv/bin/python main.py -f keywords_20261022_tambahan.txt -o output/harga_material_20261027_tambahan.xlsx --deskripsi >> output/scrape_20261027_tambahan.log 2>&1
+.venv/bin/python main.py -f keywords_material.txt -o output/harga_material_20261028.xlsx --deskripsi --deskripsi-maks 0
 ```
 
-### 3. Cek progres (sudah berapa dari berapa)
+### 2. Cek progres (sudah berapa dari berapa)
 
 Ringkasan progres, diperbarui terus selama berjalan:
 
 ```bash
-cat output/harga_material_20261027_PROGRES.txt
+cat output/harga_material_20261028_PROGRES.txt
 ```
 
-Ikuti log secara langsung (di terminal lain; Ctrl+C hanya menghentikan pemantauan):
+Ikuti log lengkap secara langsung (di terminal lain; Ctrl+C hanya menghentikan pemantauan):
 
 ```bash
-tail -f output/scrape_20261027.log
+tail -f output/harga_material_20261028.log
 ```
 
-Hasil sementara bisa dibuka kapan saja di `output/harga_material_20261027.xlsx`
+Hasil sementara bisa dibuka kapan saja di `output/harga_material_20261028.xlsx`
 (diperbarui tiap 5 menit dan saat proses dihentikan).
 
-### 4. Melanjutkan proses yang berhenti
+### 3. Melanjutkan proses yang berhenti
 
 Jalankan lagi **perintah yang sama persis**, terutama `-o` yang sama. Contoh untuk daftar
 utama:
 
 ```bash
-.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi >> output/scrape_20261027.log 2>&1
+.venv/bin/python main.py -f keywords_material.txt -o output/harga_material_20261028.xlsx --deskripsi
 ```
 
 - Yang sudah selesai dilewati, yang gagal dicoba lagi, dan deskripsi tidak diambil ulang.
 - Berlaku setelah Ctrl+C, laptop mati/sleep, atau koneksi putus, termasuk dilanjutkan
   besok hari.
 - Perintah lengkapnya juga tertulis di bagian bawah file `_PROGRES.txt`.
-- Log memakai `>>` (menambah), jadi log jalan sebelumnya tidak tertimpa.
+- Log jalan berikutnya ditambahkan ke file log yang sama, jadi log sebelumnya tidak tertimpa.
 - Jangan ubah `-p`, `--mitra10-store`, `--sort`, atau `--min-price` saat melanjutkan;
   script akan menolak supaya hasil tidak tercampur.
 
 Mulai dari awal (abaikan progres tersimpan untuk output ini), tambahkan `--ulang`:
 
 ```bash
-.venv/bin/python main.py -f keywords_20261021.txt -o output/harga_material_20261027.xlsx --deskripsi --ulang >> output/scrape_20261027.log 2>&1
+.venv/bin/python main.py -f keywords_material.txt -o output/harga_material_20261028.xlsx --deskripsi --ulang
 ```
 
-### 5. Isi deskripsi ke file hasil yang sudah ada (tanpa scraping ulang)
+### 4. Isi deskripsi ke file hasil yang sudah ada (tanpa scraping ulang)
 
 Hasil disimpan ke `<nama file>_deskripsi.xlsx`; file asli tidak diubah. Tambahkan
 `--maks 0` untuk semua produk relevan (default 10 per kata kunci). Bisa dilanjutkan dengan
 menjalankan perintah yang sama.
 
 ```bash
-.venv/bin/python main.py deskripsi output/harga_material_20261021_New_22Okt.xlsx >> output/deskripsi_New_22Okt.log 2>&1
+.venv/bin/python main.py deskripsi output/harga_material_20261021_New_22Okt.xlsx
 ```
 
 ```bash
 cat output/harga_material_20261021_New_22Okt_deskripsi_PROGRES.txt
 ```
 
-### 6. Uji cepat satu kata kunci (sebelum dimasukkan ke file kata kunci)
+### 5. Uji cepat satu kata kunci (sebelum dimasukkan ke file kata kunci)
 
 ```bash
 .venv/bin/python main.py -k "kaca 8mm per m2" -s tokopedia
 ```
 
-### 7. Harga Mitra10 dari toko lain
+### 6. Harga Mitra10 dari toko lain
 
 Lihat daftar ID toko:
 
@@ -132,7 +135,7 @@ Lihat daftar ID toko:
 Scraping Mitra10 dengan toko tertentu (contoh ID 1 = MITRA10 CIBUBUR):
 
 ```bash
-.venv/bin/python main.py -f keywords_20261021.txt -s mitra10 --mitra10-store 1 -o output/harga_mitra10_toko1_20261027.xlsx >> output/scrape_mitra10_toko1_20261027.log 2>&1
+.venv/bin/python main.py -f keywords_material.txt -s mitra10 --mitra10-store 1 -o output/harga_mitra10_toko1_20261028.xlsx
 ```
 
 ### Catatan
@@ -171,6 +174,9 @@ Opsi:
   batasi N produk relevan per kata kunci per situs untuk Tokopedia/Depo Bangunan
   (default 10, 0 = semua). Untuk file hasil lama: `python main.py deskripsi <file.xlsx>`
 - `--ulang` abaikan progres tersimpan dan mulai dari awal
+- `--log` lokasi file log (default `<output>.log` di samping file output)
+- `-v` tampilkan semua detail log di terminal (default hanya baris progres, pesan penting,
+  peringatan, dan error)
 - `--show-browser` tampilkan jendela browser Mitra10 (untuk debug)
 
 Kolom output: `source, keyword, name, price, url, relevant, match_score, original_price,

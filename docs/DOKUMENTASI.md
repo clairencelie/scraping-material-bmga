@@ -76,8 +76,9 @@ python main.py -f keywords.txt -s mitra10 --mitra10-store 1
 | `--deskripsi` | mati | Ambil juga deskripsi produk ke kolom `description` (bagian 6.1) |
 | `--deskripsi-maks` | `10` | Maks produk relevan per kata kunci per situs yang diambil deskripsinya (Tokopedia/Depo Bangunan; `0` = semua). Mitra10 selalu semua |
 | `--ulang` | mati | Abaikan progres tersimpan untuk output ini dan mulai dari awal (3.4) |
+| `--log` | `<output>.log` | File log (ditambahkan di akhir setiap kali dijalankan) |
 | `--show-browser` | mati | Tampilkan jendela browser Mitra10 (untuk debug) |
-| `-v`, `--verbose` | mati | Log level DEBUG |
+| `-v`, `--verbose` | mati | Tampilkan semua pesan log di terminal; file log level DEBUG |
 
 ### 3.2 Perintah khusus
 
@@ -104,11 +105,17 @@ kunci lain. Situs yang gagal dibuka (mis. Shopee belum login) dilewati.
 | `2` | Tidak ada kata kunci (lupa `-k`/`-f`), atau pengaturan berbeda dari jalan sebelumnya (3.4) |
 | `130` | Dihentikan dengan Ctrl+C (hasil sementara sudah disimpan) |
 
-Untuk jalan panjang, simpan log ke file:
-
-```bash
-python main.py -f keywords.txt -o output/harga.xlsx > output/scrape.log 2>&1
-```
+**Tampilan terminal & log** (`scraper/progress.py`):
+- Terminal menampilkan satu baris progres yang terus diperbarui. Saat scraping, isinya
+  batang progres, jumlah kata kunci × situs selesai dari total, kata kunci yang sedang
+  diproses, jumlah produk, lama berjalan, dan perkiraan sisa waktu. Saat mengambil
+  deskripsi, isinya progres per situs.
+- Pesan penting (mulai, melanjutkan, ringkasan akhir), peringatan, dan error dicetak di atas
+  baris progres. `-v` menampilkan semua pesan.
+- Semua pesan juga masuk ke file log `<output>.log` (atau `--log`), dengan tanggal dan jam,
+  ditambahkan di akhir setiap kali dijalankan.
+- Bila keluaran dialihkan ke file (`> log 2>&1`), baris progres tidak digambar dan semua
+  pesan INFO ditulis biasa, jadi cara lama tetap berfungsi.
 
 ### 3.4 Progres tersimpan & melanjutkan proses yang berhenti
 
@@ -165,6 +172,7 @@ scraper/
   relevance.py          penanda relevan/match_score
   description.py        pengisi kolom description (memilih produk, paralel, cache per URL)
   checkpoint.py         jurnal progres, file _PROGRES.txt, dan mekanisme melanjutkan
+  progress.py           baris progres di terminal dan logging ke file
   mitra10.py            scraper Mitra10
   depobangunan.py       scraper Depo Bangunan
   tokopedia.py          scraper Tokopedia
@@ -438,7 +446,7 @@ produk, dan hasil yang diharapkan) dan pastikan kasus lama tetap benar.
 | File | Isi | Sumber |
 |---|---|---|
 | `keywords.txt` | 99 kata kunci, 11 kategori | `Compile Gedung All Auditor.xlsx`, diklasifikasikan dari uraian & spesifikasi |
-| `keywords_20261021.txt` | 204 kata kunci, 12 kategori | `Compile Gedung Part 2 - 16 Oct 26 - Kategori Material.xlsx`, sheet `Compile All Auditor - Kategori` (kolom Material, Merk, Tipe / Seri, Ukuran / Detail) |
+| `keywords_renovasi_2017_2022.txt` | 236 kata kunci: 204 dari kolom material (12 kategori) + 32 untuk komponen multi-material yang belum punya data (kaca per m2, stiker sandblast, serat fiber, metal stud, kap lampu TL, knee PVC, dll.) | `Compile Gedung Part 2 - 16 Oct 26 - Kategori Material.xlsx`, sheet `Compile All Auditor - Kategori` (kolom Material, Merk, Tipe / Seri, Ukuran / Detail), dan sheet `Multi-Material Rincian` di file analisa kewajaran 21 Okt 2026 |
 
   Kolom Merk/Ukuran di file Part 2 diisi otomatis dan cukup sering salah tempel (mis.
   keramik bermerk "Sika", gypsum bermerk "Vinilex"), jadi kata kunci disusun per material
@@ -446,7 +454,7 @@ produk, dan hasil yang diharapkan) dan pastikan kasus lama tetap benar.
   didukung minimal 2 baris data. Kolom "Keyword Scraping" bawaan file (1.870 kata kunci)
   tidak dipakai langsung karena memuat jasa ("jasa furniture custom hpl per meter") dan
   hasil salah kategori ("cermin taco 9mm" untuk multiplek + HPL).
-- Daftar baru dibuat sebagai file bertanggal; daftar lama tidak diubah.
+- Daftar baru dibuat sebagai file terpisah; daftar lama tidak diubah.
 
 **Asal-usul `keywords.txt`:** setiap baris file audit diklasifikasikan berdasarkan uraian dan
 spesifikasinya. Spesifikasi biasanya ditulis "ex <merek> <tipe/ukuran>", misalnya

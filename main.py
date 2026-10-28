@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from scraper import description, relevance
+from scraper import description, progress, relevance
 from scraper.checkpoint import Checkpoint, SettingsChanged
 from scraper.depobangunan import DepoBangunanScraper
 from scraper.mitra10 import DEFAULT_STORE_ID, Mitra10Scraper, list_stores
@@ -142,26 +142,38 @@ def run(args) -> int:
         print("Tidak ada kata kunci. Pakai -k \"semen\" atau --keywords-file keywords.txt", file=sys.stderr)
         return 2
 
+    output = Path(args.output or f"output/harga_material_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    log_file = Path(args.log) if args.log else output.with_suffix(".log")
+    progress.setup_logging(args.verbose, log_file)
     if not args.output:
         log.warning("Tanpa -o, nama output memakai jam sekarang sehingga proses TIDAK bisa dilanjutkan "
                     "bila berhenti. Pakai -o output/nama.xlsx untuk jalan yang panjang.")
-    output = Path(args.output or f"output/harga_material_{datetime.now():%Y%m%d_%H%M%S}.csv")
     meta = {"mode": "scraping", "pages": args.pages, "mitra10_store": args.mitra10_store,
             "sort": args.sort, "min_price": args.min_price}
     try:
         cp = Checkpoint(output, meta, fresh=args.ulang)
     except SettingsChanged as e:
-        print(e, file=sys.stderr)
+        log.error("%s", e)
         return 2
+    progress.say(f"Mulai: {len(keywords)} kata kunci x {len(args.sites)} situs -> {output} (log: {log_file})")
 
     tasks = [(site, kw) for site in args.sites for kw in keywords]
     cp.plan(args.sites, keywords)
     done_before = sum(1 for t in tasks if cp.is_done(*t))
     if done_before:
-        log.info("[lanjut] %d / %d kata kunci x situs sudah selesai sebelumnya, dilewati; "
-                 "%d deskripsi sudah tersimpan", done_before, len(tasks), len(cp.desc))
+        progress.say(f"Melanjutkan: {done_before} / {len(tasks)} kata kunci x situs sudah selesai sebelumnya "
+                     f"(dilewati), {len(cp.desc)} deskripsi sudah tersimpan")
     snapshot = Snapshot(output, lambda: cp.products_for(tasks))
     cp.write_status("scraping", force=True)
+
+    # Baris progres di terminal, digambar ulang setiap ada kemajuan.
+    view = {"phase": "scraping", "current": ""}
+
+    def show() -> None:
+        progress.line.set(cp.summary_line(view["phase"], view["current"]))
+
+    cp.on_change = show
+    show()
 
     try:
         for site in args.sites:
@@ -171,11 +183,14 @@ def run(args) -> int:
             try:
                 with build_scraper(site, args) as scraper:
                     for i, kw in enumerate(pending):
+                        view["current"] = f"{site}: {kw}"
+                        show()
                         try:
                             found = scraper.search(kw, max_pages=args.pages)
                         except Exception as e:  # satu kata kunci gagal tidak menghentikan yang lain
                             log.error("[%s] '%s' gagal: %s", site, kw, e)
                             cp.failures.append(f"{site}: {kw}")
+                            show()
                         else:
                             if args.min_price is not None:
                                 found = [p for p in found if p.price and p.price >= args.min_price]
@@ -195,42 +210,40 @@ def run(args) -> int:
 
         all_products = cp.products_for(tasks)
         if args.deskripsi:
+            progress.line.finish()
+            progress.say("Scraping selesai, lanjut mengambil deskripsi produk")
+            view["phase"] = "deskripsi"
             cp.write_status("deskripsi", force=True)
             description.enrich(all_products, max_per_keyword=args.deskripsi_maks, cache=cp.desc, tracker=cp)
     except KeyboardInterrupt:
+        progress.line.finish()
+        cp.on_change = None
         products = snapshot.now()
         cp.write_status("dihentikan (Ctrl+C)", force=True)
         cp.close()
-        print(f"\nDihentikan. {len(products)} baris hasil sementara ada di {output}.\n"
-              f"Progres: {cp.status_path}\nLanjutkan dengan menjalankan perintah yang sama.", file=sys.stderr)
+        progress.say(f"Dihentikan. {len(products)} baris hasil sementara ada di {output}. "
+                     f"Progres: {cp.status_path}. Lanjutkan dengan menjalankan perintah yang sama.")
         return 130
 
+    progress.line.finish()
+    cp.on_change = None
     save(all_products, output)
     complete = all(cp.is_done(*t) for t in tasks)
     cp.write_status("selesai" if complete else "selesai sebagian (ada yang gagal)", force=True)
     cp.close()
 
-    print(f"\n{len(all_products)} produk disimpan ke {output}")
+    progress.say(f"{len(all_products)} produk disimpan ke {output}")
     for site in args.sites:
         site_products = [p for p in all_products if p.source == site]
         n_relevant = sum(1 for p in site_products if p.relevant)
         n_desc = sum(1 for p in site_products if p.description)
-        print(f"  {site:<13} {len(site_products):>5}  (relevan: {n_relevant}"
-              + (f", deskripsi: {n_desc}" if args.deskripsi else "") + ")")
+        progress.say(f"  {site:<13} {len(site_products):>5}  (relevan: {n_relevant}"
+                     + (f", deskripsi: {n_desc}" if args.deskripsi else "") + ")")
     if cp.failures:
-        print("Gagal: " + ", ".join(cp.failures))
-        print("Jalankan perintah yang sama untuk mencoba ulang yang gagal.")
-    print(f"Progres & jurnal: {cp.status_path}, {cp.journal_path}")
+        progress.say("Gagal: " + ", ".join(cp.failures))
+        progress.say("Jalankan perintah yang sama untuk mencoba ulang yang gagal.")
+    progress.say(f"Progres: {cp.status_path} | jurnal: {cp.journal_path} | log: {log_file}")
     return 0 if all_products else 1
-
-
-def setup_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def run_deskripsi(argv: list[str]) -> int:
@@ -245,16 +258,18 @@ def run_deskripsi(argv: list[str]) -> int:
                     help="ambil juga untuk produk yang relevant=False (default hanya yang relevan)")
     ap.add_argument("--ulang", action="store_true",
                     help="abaikan progres sebelumnya dan mulai dari awal")
-    ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--log", help="file log (default: <file tujuan>.log, ditambahkan di akhir)")
+    ap.add_argument("-v", "--verbose", action="store_true", help="tampilkan semua pesan log di terminal")
     args = ap.parse_args(argv)
-    setup_logging(args.verbose)
 
     src = Path(args.file)
     output = Path(args.output or src.with_name(f"{src.stem}_deskripsi{src.suffix}"))
+    log_file = Path(args.log) if args.log else output.with_suffix(".log")
+    progress.setup_logging(args.verbose, log_file)
     try:
         cp = Checkpoint(output, {"mode": "deskripsi", "source_file": str(src.resolve())}, fresh=args.ulang)
     except SettingsChanged as e:
-        print(e, file=sys.stderr)
+        log.error("%s", e)
         return 2
     products = load_products(src)
     for p in products:
@@ -262,9 +277,11 @@ def run_deskripsi(argv: list[str]) -> int:
             p.match_score, p.relevant = relevance.score(p.keyword, p.name)
         if not p.description and cp.desc.get(p.url):
             p.description = cp.desc[p.url]
+    progress.say(f"Mulai: deskripsi untuk {src} -> {output} (log: {log_file})")
     if cp.desc:
-        log.info("[lanjut] %d deskripsi sudah tersimpan dari jalan sebelumnya", len(cp.desc))
+        progress.say(f"Melanjutkan: {len(cp.desc)} deskripsi sudah tersimpan dari jalan sebelumnya")
     cp.write_status("deskripsi", force=True)
+    cp.on_change = lambda: progress.line.set(cp.summary_line("deskripsi"))
 
     def collect() -> list[Product]:
         for p in products:
@@ -276,21 +293,25 @@ def run_deskripsi(argv: list[str]) -> int:
         description.enrich(products, max_per_keyword=args.maks, only_relevant=not args.semua_baris,
                            cache=cp.desc, tracker=cp)
     except KeyboardInterrupt:
+        progress.line.finish()
+        cp.on_change = None
         Snapshot(output, collect).now()
         cp.write_status("dihentikan (Ctrl+C)", force=True)
         cp.close()
-        print(f"\nDihentikan. Hasil sementara ada di {output}.\nProgres: {cp.status_path}\n"
-              "Lanjutkan dengan menjalankan perintah yang sama.", file=sys.stderr)
+        progress.say(f"Dihentikan. Hasil sementara ada di {output}. Progres: {cp.status_path}. "
+                     "Lanjutkan dengan menjalankan perintah yang sama.")
         return 130
 
+    progress.line.finish()
+    cp.on_change = None
     save(collect(), output)
     cp.write_status("selesai", force=True)
     cp.close()
-    print(f"\n{len(products)} baris disimpan ke {output}")
+    progress.say(f"{len(products)} baris disimpan ke {output}")
     for site in dict.fromkeys(p.source for p in products):
         site_products = [p for p in products if p.source == site]
-        print(f"  {site:<13} deskripsi terisi {sum(1 for p in site_products if p.description):>5} / {len(site_products)}")
-    print(f"Progres & jurnal: {cp.status_path}, {cp.journal_path}")
+        progress.say(f"  {site:<13} deskripsi terisi {sum(1 for p in site_products if p.description):>5} / {len(site_products)}")
+    progress.say(f"Progres: {cp.status_path} | jurnal: {cp.journal_path} | log: {log_file}")
     return 0
 
 
@@ -325,9 +346,9 @@ def main() -> int:
                     help="abaikan progres sebelumnya untuk output ini dan mulai dari awal "
                          "(default: jalankan ulang perintah yang sama = melanjutkan)")
     ap.add_argument("--show-browser", action="store_true", help="tampilkan jendela browser Mitra10")
-    ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--log", help="file log (default: <output>.log di samping file output, ditambahkan di akhir)")
+    ap.add_argument("-v", "--verbose", action="store_true", help="tampilkan semua pesan log di terminal")
     args = ap.parse_args()
-    setup_logging(args.verbose)
     return run(args)
 
 

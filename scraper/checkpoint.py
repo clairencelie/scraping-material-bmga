@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import Product
+from .progress import bar
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ class Checkpoint:
         self._sites: list[str] = []
         self._keywords: list[str] = []
         self._task_set: set[tuple[str, str]] = set()
+        self._desc_site = ""
+        # Dipanggil setiap ada kemajuan (mis. untuk menggambar ulang baris progres di terminal).
+        self.on_change = None
 
         if fresh:
             for p in (self.journal_path, self.status_path):
@@ -111,6 +115,7 @@ class Checkpoint:
                       "products": [p.to_dict() for p in products]})
         self.tasks[(site, keyword)] = products
         self._session_tasks += 1
+        self._changed()
 
     def products_for(self, tasks: list[tuple[str, str]]) -> list[Product]:
         """Produk dari kata kunci×situs yang sudah selesai, urut sesuai daftar tugas sekarang."""
@@ -127,7 +132,9 @@ class Checkpoint:
         """`total` = semua halaman yang direncanakan, `done` = yang sudah ada dari jalan sebelumnya."""
         self.desc_plan[site] = total
         self.desc_done[site] = done
+        self._desc_site = site
         self.write_status(phase="deskripsi", force=True)
+        self._changed()
 
     def result(self, site: str, url: str, text: str | None) -> None:
         self._append({"type": "desc", "url": url, "description": text or ""})
@@ -136,8 +143,37 @@ class Checkpoint:
             self.desc_done[site] = self.desc_done.get(site, 0) + 1
             self._session_desc += 1
         self.write_status(phase="deskripsi")
+        self._changed()
+
+    def _changed(self) -> None:
+        if self.on_change:
+            self.on_change()
 
     # ------------------------------------------------------------------ status
+    def tasks_done(self) -> int:
+        return sum(1 for t in self.tasks if t in self._task_set)
+
+    def summary_line(self, phase: str, current: str = "") -> str:
+        """Satu baris ringkas untuk terminal."""
+        elapsed = int(time.time() - self._started)
+        jalan = f"jalan {elapsed // 3600}j{elapsed % 3600 // 60:02d}m" if elapsed >= 3600 else f"jalan {elapsed // 60}m{elapsed % 60:02d}d"
+        if phase == "scraping":
+            done, total = self.tasks_done(), self.total_tasks
+            n_products = sum(len(v) for t, v in self.tasks.items() if t in self._task_set)
+            parts = [f"[scraping] {bar(done, total)} {done}/{total} ({done * 100 // max(total, 1)}%)"]
+            if current:
+                parts.append(current)
+            parts += [f"{n_products:,} produk".replace(",", "."), jalan,
+                      f"sisa {self._eta(total - done, self._session_tasks)}"]
+            if self.failures:
+                parts.append(f"gagal {len(self.failures)}")
+            return " | ".join(parts)
+        site = self._desc_site
+        total, done = self.desc_plan.get(site, 0), self.desc_done.get(site, 0)
+        remaining = sum(self.desc_plan.values()) - sum(self.desc_done.get(s, 0) for s in self.desc_plan)
+        return " | ".join([f"[deskripsi {site}] {bar(done, total)} {done}/{total} ({done * 100 // max(total, 1)}%)",
+                           jalan, f"sisa {self._eta(remaining, self._session_desc)}"])
+
     def _eta(self, remaining: int, done_this_session: int) -> str:
         if not remaining:
             return "-"
